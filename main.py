@@ -198,6 +198,9 @@ x11,x22,y11,y22 = 0,0,0,0
 x1_step,x2_step =0,0
 cropped = 0
 
+def interpolated(x): #возвращает пиксель по длинне волны
+    return -2412733 + 2081.26*x - 0.680417*x*x + 0.0000998434*x*x*x - 0.00000000553115*x*x*x*x
+
 def cropp(gray_image,x1,y1,x2,y2):
     global cropped, spectr
     cv2.namedWindow('gray', cv2.WINDOW_NORMAL)
@@ -255,9 +258,9 @@ for i in range(0,len(waves)):
     print(str(i)+')'+str(waves[i]))
 print('')
 print('Введите номер длинны волны из списка выше: ')
-wave0 = int(input())
+wave0_num = int(input())
 print('Ждите')
-wave0 = waves[wave0]
+wave0 = waves[wave0_num]
 
 ### Удаляем все что до введенной длинны волны wave0 ###
 while True:
@@ -275,144 +278,127 @@ pixels[0] = 0
 pixels[1] = diff[0]
 for i in range(2,len(pixels)):
     pixels[i] = pixels[i-1] + diff[i-1]
+
 ### Работаем с изображением ###
 y_gr, x_gr = graph_image.shape[:2]# Получаем размеры
 row = graph_image[0][0:x_gr] #Проходим изображение последовательно построчно и суммируем все строки
 for i in range(1,y_gr):
     row += graph_image[i][0:x_gr]
 row = row / y_gr#Делим на количество строк и получаем примитивный фильтр шума
-# row - наша функция для опр. изображения
+# row - наша зависимость черноты изображения для каждого пикселя
 ### Приводим значения к формату от 0 до 100 ###
 row_max = max(row)
 row_min = min(row)
 for i in range(len(row)):
     row[i]=row[i]-row_min
     row[i]=100*row[i]/row_max
-############################
 
-interpolated = interpolate.interp1d(list(pixels),list(waves), kind ='cubic') # Интерполяция 
+shift_pix = interpolated(wave0)
+end_pix = x_gr
+step_wave = 0.15
+end_wave = None
 
-y_coord = []
-for i in range(0,101,20):
-    y_coord.append(i)
-
-############################
-
-# wave_list = []
-
-# default_wave_list = [4050, 4075, 4100, 4125, 4150, 4200, 4250, 4300, 4350]
-
-# while True:
-#     if wave0 < default_wave_list[0]:
-#         wave_list.append(int(wave0))
-#         wave_list = wave_list + default_wave_list
-#         break
-#     del default_wave_list[0]
-
-# print(wave_list)
-
-# x_coord_list = []
-
-# for tmp_wave in wave_list:
-#     for i in range(x_gr):
-#         coord_wave = np.round(interpolated(i),1)
-#         if coord_wave == tmp_wave:
-#             x_coord_list.append(i)
-#             break
-
-# print(x_coord_list)
-
-# for i in range(len(x_coord_list)-1):
-#     print(x_coord_list[i]-x_coord_list[i+1])
-
-############################
-
-numOFticks = 11
-
-wave_list =[]
-
-for i in range(x_gr):
-    tmp = interpolated(i)
-    if tmp == wave0:
-        wave0_coord = i
+i = 1
+while True:
+    end_wave = 4500-i*step_wave
+    if x_gr > int(interpolated(end_wave)):
         break
+    i += 1
+
+end_wave = int(end_wave)
+
+tmp = []
+wave_tmp = wave0
+
+while True:
+    if wave_tmp >= end_wave:
+        break
+    tmp.append(int(interpolated(wave_tmp)))
+    wave_tmp += step_wave
+
+graph = []
+for i in range(len(tmp)):
+    try:
+        graph.append(row[tmp[i]])
+    except:
+        break
+
+default_wave_list = [4050, 4075, 4100, 4125, 4136, 4137, 4150, 4200, 4250, 4300, 4350]
+wave_list = []
+
+while True:
+    if wave0 < default_wave_list[0]:
+        for i in range(len(default_wave_list)):
+            if default_wave_list[i] > end_wave:
+                break
+            else:
+                wave_list.append(default_wave_list[i])
+        break
+    del default_wave_list[0]
 
 x_coord_list = []
-delta = (x_gr - wave0_coord)/ numOFticks
-for i in range(numOFticks):
-    x_coord_list.append(np.round(wave0_coord+i*delta,0))
 
-for i in x_coord_list:
-    wave_list.append(np.round(interpolated(i),0))
+for i in range(len(wave_list)):
+    x_coord_list.append((wave_list[i]-int(wave0))/step_wave)
 
-for i in range(len(wave_list)-1):
-    if wave_list[i] < 4150 and wave_list[i+1] > 4150:
-        wave_list.insert(i+1, "")
-        wave_list.insert(i+2, "")
-        raze_start = x_coord_list[i]
-        raze_end = x_coord_list[i+1]
-        raze_center = int((raze_end - raze_start)/2)
-        x_coord_list.insert(i+1, raze_start + raze_center-2)
-        x_coord_list.insert(i+2, raze_start + raze_center+2)
-        break
+for i in range(len(wave_list)):
+    if wave_list[i] == 4136 or wave_list[i] == 4137:
+        wave_list[i] = ''
+    
+if len(x_coord_list) != len(wave_list):
+    wave_list = wave_list[:len(x_coord_list)]
 
 fig,ax=plt.subplots() #Создаем фигуру графика
 
-listOfannot = []
+y_dot = [0, 20, 40, 60, 80, 100]
 
-def f(x, y): #Функция чтобы прсоединить функцию отслеживания нажатия на график и расчета длинны волны в точке
+listOfannot = [] #Список отметок вершин на графике
+
+def f(x , y): #Функция чтобы прсоединить функцию отслеживания нажатия на график и расчета длинны волны в точке
     global wave
-    wave = interpolated(x)
-    cid =  fig.canvas.mpl_connect('button_press_event',  onclick)
-    return  str(np.round(wave, 3))
+    wave = x*step_wave + wave0
+    return str(np.round(wave, 3))
 
-def onclick(event):# Функция, печатающая координаты на графике по двойному нажатию ЛКМ
+def onclick(event):# Функция, печатающая длинну волны на графике по двойному нажатию ЛКМ
     if event.dblclick:
         x = event.xdata
         y = event.ydata
-        annot = ax.annotate('--' + str(np.round(wave, 1)), xy=(x,y), xytext=(0,0), textcoords="offset points", rotation=90)
-        annot.set_visible(True)
-        listOfannot.append(annot)
+        annot = ax.annotate('--' + str(np.round(wave, 1)), xy=(x,y), xytext=(0,0), textcoords="offset points", rotation=90)# Создаем подпись (в скобках ее параметры)
+        annot.set_visible(True)#Делаем ее видимой
+        listOfannot.append(annot)# Дополняем к массиву подписей
         fig.canvas.draw() #Перерисовать график
         
-def on_press(event):
+def on_press(event):# Функция, позволяющая удалять и перемещать напечатанные на графике подписи вершин
     pos_list_annot = len(listOfannot) - 1
-    print(listOfannot)
-    if event.key == 't' and len(listOfannot) !=0: 
-        listOfannot[pos_list_annot].set_visible(False)
-        del listOfannot[pos_list_annot]
-        fig.canvas.draw()
-    if event.key == 'a':
-        x = listOfannot[pos_list_annot].xy[0]
-        y = listOfannot[pos_list_annot].xy[1]
-        listOfannot[pos_list_annot].xy = (x-1,y)
-        fig.canvas.draw()
-    if event.key == 'd':
-        x = listOfannot[pos_list_annot].xy[0]
-        y = listOfannot[pos_list_annot].xy[1]
-        listOfannot[pos_list_annot].xy = (x+1,y)
-        fig.canvas.draw()    
-    if event.key == 'w':
-        x = listOfannot[pos_list_annot].xy[0]
-        y = listOfannot[pos_list_annot].xy[1]
-        listOfannot[pos_list_annot].xy = (x,y+1)
-        fig.canvas.draw()
-    if event.key == 's':
-        x = listOfannot[pos_list_annot].xy[0]
-        y = listOfannot[pos_list_annot].xy[1]
-        listOfannot[pos_list_annot].xy = (x,y-1)
-        fig.canvas.draw()
-        
-ax.format_coord=f# Добавляем функцию печати на графике
+    mark = listOfannot[pos_list_annot]
+    x = mark.xy[0]
+    y = mark.xy[1]
 
-plt.rcParams['keymap.save'].remove('s')
+    if event.key == 't' and pos_list_annot + 1 !=0:
+        mark.set_visible(False)
+        del mark
+    elif event.key == 'a':
+        mark.xy = (x-2,y)
+    elif event.key == 'd':
+        mark.xy = (x+2,y)   
+    elif event.key == 'w':
+        mark.xy = (x,y+1)
+    elif event.key == 's':
+        mark.xy = (x,y-1)
+        
+    fig.canvas.draw()
+        
+ax.format_coord=f# Добавляем функцию вычисления координаты на графике
+
+plt.rcParams['keymap.save'].remove('s')#Удаляем привязанные к matplotlib горячие клавиши
 plt.rcParams['keymap.quit'].remove('q')
-plt.ylim (0, 100)
-ax.plot(row, color='black')
-plt.xticks(x_coord_list, wave_list)
-plt.yticks(y_coord)
-ax.set_xlabel('Длинна волны (Ангстрем)')
+plt.rcParams['figure.dpi'] = 1200
+plt.ylim (0, 105)# Предел оси Y
+ax.plot(graph, color='black')# График данных row черного цвета
+plt.xticks(x_coord_list,wave_list)# отметки оси X
+plt.yticks(y_dot)# отметки оси Y
+ax.set_xlabel('Длинна волны (Ангстрем)')#Подписи к осям
 ax.set_ylabel('Интенсивность (относительные единицы)')
-fig.canvas.mpl_connect('button_press_event', onclick)
-fig.canvas.mpl_connect('key_press_event', on_press)
+fig.canvas.mpl_connect('button_press_event', onclick)#Подключаем клик по мышке
+fig.canvas.mpl_connect('key_press_event', on_press)# И чтение введенных символов с клавиатуры
 plt.show()
